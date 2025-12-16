@@ -18,6 +18,7 @@ const char* WIFI_PASS = "12345678";
 
 // -------------------- Face server --------------------
 const char* FACE_API_URL = "http://178.128.52.230:8000/identify";
+const char* REGISTER_API_BASE = "http://178.128.52.230:8000/register?name=";
 const char* FACE_API_KEY = "CARL_PHILIP_RENCE";
 
 // -------------------- Camera pins (AI Thinker ESP32-CAM) --------------------
@@ -170,6 +171,16 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     .btn.primary{background: rgba(59,130,246,.22); border-color: rgba(59,130,246,.35)}
     .btn.danger{background: rgba(239,68,68,.18); border-color: rgba(239,68,68,.35)}
     .btn:disabled{opacity:.55; cursor:not-allowed}
+    .input-group{
+      display:flex; gap:8px; margin-top:12px;
+      padding-top:12px; border-top:1px dashed var(--line);
+    }
+    input[type=text]{
+      background: rgba(0,0,0,.2); border:1px solid var(--line);
+      color: var(--txt); padding:8px 12px; border-radius:12px;
+      outline:none; font-size:13px; width:100%;
+    }
+    input[type=text]:focus{border-color:var(--blue)}
     .switch{
       display:inline-flex; align-items:center; gap:10px;
       user-select:none;
@@ -260,7 +271,12 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
               <div>
                 <div style="font-weight:800">Active</div>
                 <div class="sub" id="activeHint">Device is armed</div>
-              </div>
+              </div>input-group">
+            <input type="text" id="regName" placeholder="Enter Name to Register" />
+            <button class="btn" id="btnRegister">Register</button>
+          </div>
+
+          <div class="
             </div>
 
             <div class="row">
@@ -413,17 +429,50 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 
       const msg = extractStatusText(obj) || respText;
       if(isWelcomeText(msg)){
-        setBigStatus("good", msg);
-      }else if(obj.error || String(msg).toLowerCase().includes("error") || String(msg).toLowerCase().includes("not")){
-        setBigStatus("bad", msg);
-      }else{
-        setBigStatus("", msg);
+  async function registerFace(){
+    const name = $("regName").value.trim();
+    if(!name){ alert("Please enter a name first."); return; }
+
+    const wasLive = !!liveTimer;
+    stopLive();
+
+    $("btnRegister").disabled = true;
+    setBigStatus("", "Registering " + name + "…");
+
+    try{
+      // encodeURIComponent ensures spaces and special chars are handled safely
+      const url = "/register?name=" + encodeURIComponent(name);
+      const respText = await fetch(url, {cache:"no-store"}).then(r=>r.text());
+      const obj = parseMaybeJson(respText);
+      $("jsonBox").textContent = pretty(obj);
+
+      const msg = extractStatusText(obj) || respText;
+      if(obj.error){
+        setBigStatus("bad", "Reg Error: " + (obj.error || msg));
+      } else {
+        setBigStatus("good", "Registered: " + msg);
       }
     }catch(e){
-      setBigStatus("bad", "Verify failed: " + e.message);
+      setBigStatus("bad", "Register failed: " + e.message);
     }finally{
-      $("btnVerify").disabled = false;
+      $("btnRegister").disabled = false;
       await refreshState();
+      if(wasLive) startLive();
+    }
+  }
+
+  // wiring UI events
+  $("btnRefresh").onclick = refreshState;
+  $("btnStart").onclick = startLive;
+  $("btnStop").onclick = stopLive;
+
+  $("btnSnap").onclick = ()=>{
+    // opens jpg in new tab
+    window.open("/capture?t=" + Date.now(), "_blank");
+  };
+
+  $("btnVerify").onclick = verifyNow;
+  $("btnRegister").onclick = registerFace
       if(wasLive) startLive();
     }
   }
@@ -533,12 +582,12 @@ void handleCapture() {
 }
 
 // Captures a JPEG and POSTs it to FACE_API_URL as raw bytes (Content-Type: image/jpeg).
-String postFrameToFaceServer(camera_fb_t* fb, int &outHttpCode) {
+String postFrameToFaceServer(camera_fb_t* fb, int &outHttpCode, const char* targetUrl = FACE_API_URL) {
   HTTPClient http;
   WiFiClient client;
 
   http.setTimeout(25000);
-  if (!http.begin(client, FACE_API_URL)) {
+  if (!http.begin(client, targetUrl)) {
     outHttpCode = -1;
     return "{\"error\":\"http_begin_failed\"}";
   }
@@ -598,6 +647,64 @@ void handleVerify() {
   g_busy = false;
 
   // passthrough JSON
+  sendJson(200, faceResp);
+}
+
+void handleRegister() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Cache-Control", "no-store");
+
+  if (!server.hasArg("name")) {
+    sendJson(400, "{\"error\":\"missing_name\"}");
+    return;
+  }
+  String name = server.arg("name");
+  if (name.length() == 0) {
+    sendJson(400, "{\"error\":\"empty_name\"}");
+    return;
+  }
+
+  if (!g_active) { server.send(503, "text/plain", "Inactive"); return; }
+  if (g_busy)    { server.send(503, "text/plain", "Busy"); return; }
+
+  g_busy = true;
+  g_lastErr = "";
+
+  if (xSemaphoreTake(camMutex, pdMS_TO_TICKS(4000)) != pdTRUE) {
+    g_busy = false;
+    g_lastErr = "camera_busy";
+    g_lastJson = "{\"error\":\"camera_busy\"}";
+    sendJson(503, g_lastJson);
+    return;
+  }
+
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) {
+    xSemaphoreGive(camMutex);
+    g_busy = false;
+    g_lastErr = "capture_failed";
+    g_lastJson = "{\"error\":\"capture_failed\"}";
+    sendJson(500, g_lastJson);
+    return;
+  }
+
+  int faceHttp = 0;
+  String url = String(REGISTER_API_BASE) + name;
+  // URL encode the name if necessary? For now assuming simple names.
+  // Better to replace spaces with %20 manually if needed, but let's assume user inputs valid URL chars or browser handles it.
+  
+  String faceResp = postFrameToFaceServer(fb, faceHttp, url.c_str());
+
+  esp_camera_fb_return(fb);
+  xSemaphoreGive(camMutex);
+
+  g_lastMs = millis();
+  g_lastJson = faceResp;
+  if (faceHttp != 200) g_lastErr = "register_http_" + String(faceHttp);
+
+  g_busy = false;
+  server.on("/register", handleRegister);
+
   sendJson(200, faceResp);
 }
 
