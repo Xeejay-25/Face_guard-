@@ -56,6 +56,8 @@ unsigned long stateUntil = 0;
 bool lastPass = false;
 float lastShownDist = -999;
 
+bool espIsActive = true; // Track remote state
+
 // ===================== LED helpers =====================
 void setColor(int r, int g, int b) {
   if (COMMON_ANODE) { r = 255 - r; g = 255 - g; b = 255 - b; }
@@ -321,6 +323,7 @@ void setup() {
 
   // Keep ESP32 armed so its Web UI live view keeps working
   espSetActive(true);
+  espIsActive = true; // Sync variable
 }
 
 void loop() {
@@ -335,8 +338,24 @@ void loop() {
   if (!detected) {
     stableHits = 0;
     state = IDLE;
+// If we are currently active, tell ESP32 to sleep (Power Down Camera)
+    if (espIsActive) {
+      if (espSetActive(false)) {
+        espIsActive = false;
+        Serial.println("ESP32 set to SLEEP");
+      }
+    }
 
-    if (now - lastLEDUpdate > 25) {
+    // Someone is detected! Wake up ESP32 immediately
+  if (!espIsActive) {
+    lcdShow("WAKING UP...", "Please wait");
+    if (espSetActive(true)) {
+      espIsActive = true;
+      Serial.println("ESP32 set to ACTIVE");
+      // Small delay to let camera sensor stabilize after power up
+      delay(200); 
+    }
+  }
       rainbowStep();
       lastLEDUpdate = now;
     }

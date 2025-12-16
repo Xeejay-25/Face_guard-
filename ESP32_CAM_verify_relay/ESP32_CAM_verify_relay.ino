@@ -487,6 +487,15 @@ void handleActive() {
   if (server.hasArg("enable")) {
     String v = server.arg("enable");
     g_active = (v == "1" || v == "true");
+
+    if (g_active) {
+      // Power UP the camera
+      digitalWrite(PWDN_GPIO_NUM, LOW); 
+      delay(150); // Give sensor time to wake up
+    } else {
+      // Power DOWN the camera (saves electricity)
+      digitalWrite(PWDN_GPIO_NUM, HIGH);
+    }
   }
   sendJson(200, String("{\"active\":") + (g_active ? "true" : "false") + "}");
 }
@@ -604,6 +613,10 @@ void handleVerify() {
 void setup() {
   Serial.begin(115200);
   delay(200);
+
+  // Ensure Power Down pin is ready
+  pinMode(PWDN_GPIO_NUM, OUTPUT);
+  digitalWrite(PWDN_GPIO_NUM, LOW); // Start powered ON
 
   camMutex = xSemaphoreCreateMutex();
 
