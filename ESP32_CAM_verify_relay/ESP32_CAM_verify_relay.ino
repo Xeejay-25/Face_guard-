@@ -271,12 +271,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
               <div>
                 <div style="font-weight:800">Active</div>
                 <div class="sub" id="activeHint">Device is armed</div>
-              </div>input-group">
-            <input type="text" id="regName" placeholder="Enter Name to Register" />
-            <button class="btn" id="btnRegister">Register</button>
-          </div>
-
-          <div class="
+              </div>
             </div>
 
             <div class="row">
@@ -284,6 +279,11 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
               <button class="btn danger" id="btnStop">Stop Live</button>
               <button class="btn" id="btnStart">Start Live</button>
             </div>
+          </div>
+
+          <div class="input-group">
+            <input type="text" id="regName" placeholder="Enter Name to Register" />
+            <button class="btn" id="btnRegister">Register</button>
           </div>
 
           <div class="spacer"></div>
@@ -703,7 +703,6 @@ void handleRegister() {
   if (faceHttp != 200) g_lastErr = "register_http_" + String(faceHttp);
 
   g_busy = false;
-  server.on("/register", handleRegister);
 
   sendJson(200, faceResp);
 }
@@ -761,6 +760,7 @@ void setup() {
   server.on("/state", handleState);
   server.on("/capture", handleCapture);
   server.on("/verify", handleVerify);
+  server.on("/register", handleRegister);
 
   server.begin();
   Serial.println("HTTP server started on port 80");
