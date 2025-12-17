@@ -313,14 +313,21 @@ void setup() {
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("R4 IP: "); Serial.println(WiFi.localIP());
-    lcdShow("READY", "Stand <= 30cm");
+    
+    // Check ESP32 connection
+    lcdShow("CHECKING ESP32", "Please wait...");
+    if (espSetActive(true)) {
+      Serial.println("ESP32 connection OK");
+      lcdShow("READY", "Stand <= 30cm");
+    } else {
+      Serial.println("ESP32 connection FAILED");
+      lcdShow("ESP32 FAIL", "Check IP/Power");
+      setColor(255, 0, 0);
+    }
   } else {
     lcdShow("WIFI FAIL", "Check SSID");
     setColor(255, 0, 0);
   }
-
-  // Keep ESP32 armed so its Web UI live view keeps working
-  espSetActive(true);
 }
 
 void loop() {
