@@ -1,10 +1,13 @@
-// ESP32-CAM (AI Thinker) - Modern UI + live view (snapshot loop) + verify passthrough JSON
+// ESP32-CAM (AI Thinker) - Modern UI (clean controls) + live view (snapshot loop)
+// + verify/register passthrough JSON
+//
 // Endpoints:
-//   GET /                      -> Modern UI dashboard (live view + buttons)
+//   GET /                      -> Modern UI dashboard
 //   GET /help                  -> plain text help
 //   GET /active?enable=1|0     -> arms/disarms verification
-//   GET /capture               -> returns a single JPEG frame (debug/live view)
+//   GET /capture               -> returns a single JPEG frame
 //   GET /verify                -> captures JPEG, POSTs to FACE_API_URL, returns server JSON (passthrough)
+//   GET /register?name=...     -> captures JPEG, POSTs to REGISTER_API_BASE + urlencoded(name), returns JSON (passthrough)
 //   GET /state                 -> device state JSON
 
 #include "esp_camera.h"
@@ -17,9 +20,9 @@ const char* WIFI_SSID = "esp32";
 const char* WIFI_PASS = "12345678";
 
 // -------------------- Face server --------------------
-const char* FACE_API_URL = "http://178.128.52.230:8000/identify";
-const char* REGISTER_API_BASE = "http://178.128.52.230:8000/register?name=";
-const char* FACE_API_KEY = "CARL_PHILIP_RENCE";
+const char* FACE_API_URL        = "http://178.128.52.230:8000/identify";
+const char* REGISTER_API_BASE   = "http://178.128.52.230:8000/register?name=";
+const char* FACE_API_KEY        = "CARL_PHILIP_RENCE";
 
 // -------------------- Camera pins (AI Thinker ESP32-CAM) --------------------
 #define PWDN_GPIO_NUM     32
@@ -45,9 +48,10 @@ WebServer server(80);
 SemaphoreHandle_t camMutex;
 
 bool g_active = true;
-bool g_busy = false;
+bool g_busy   = false;
+
 unsigned long g_lastMs = 0;
-String g_lastJson = "{\"status\":\"none\"}";
+String g_lastJson = "{\"status\":\"none\"}"; // always valid JSON for /state
 String g_lastErr  = "";
 
 // -------------------- UI HTML --------------------
@@ -80,13 +84,8 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       min-height:100vh;
     }
     .wrap{max-width:1080px; margin:0 auto; padding:22px;}
-    .topbar{
-      display:flex; gap:14px; align-items:center; justify-content:space-between;
-      margin-bottom:16px;
-    }
-    .title{
-      display:flex; gap:12px; align-items:center;
-    }
+    .topbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;}
+    .title{display:flex; gap:12px; align-items:center;}
     .logo{
       width:44px; height:44px; border-radius:14px;
       background: linear-gradient(135deg, rgba(59,130,246,.9), rgba(34,197,94,.85));
@@ -94,13 +93,9 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     }
     h1{margin:0; font-size:18px; letter-spacing:.2px}
     .sub{margin:2px 0 0; color:var(--muted); font-size:12px}
-    .grid{
-      display:grid; gap:16px;
-      grid-template-columns: 1.2fr .8fr;
-    }
-    @media (max-width: 900px){
-      .grid{grid-template-columns: 1fr;}
-    }
+    .grid{display:grid; gap:16px; grid-template-columns: 1.2fr .8fr;}
+    @media (max-width: 900px){ .grid{grid-template-columns: 1fr;} }
+
     .card{
       background: var(--card);
       border: 1px solid var(--line);
@@ -114,10 +109,9 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       display:flex; align-items:center; justify-content:space-between;
       border-bottom:1px solid var(--line);
     }
-    .cardHeader .h{
-      font-size:13px; color:var(--muted); letter-spacing:.2px;
-    }
+    .cardHeader .h{font-size:13px; color:var(--muted); letter-spacing:.2px;}
     .cardBody{padding:14px;}
+
     .videoWrap{
       position:relative; border-radius: 16px; overflow:hidden;
       background: rgba(0,0,0,.35);
@@ -141,6 +135,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       transition: opacity .2s ease;
     }
     .overlay.show{opacity:1;}
+
     .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
     .chip{
       display:inline-flex; align-items:center; gap:8px;
@@ -155,6 +150,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     .dot.good{background:var(--good)}
     .dot.bad{background:var(--bad)}
     .dot.blue{background:var(--blue)}
+
     .btn{
       appearance:none; border:1px solid var(--line);
       background: rgba(255,255,255,.10);
@@ -165,26 +161,22 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       font-weight:600;
       font-size:13px;
       transition: transform .06s ease, background .15s ease;
+      display:inline-flex; align-items:center; justify-content:center;
     }
     .btn:hover{background: rgba(255,255,255,.14)}
     .btn:active{transform: translateY(1px)}
     .btn.primary{background: rgba(59,130,246,.22); border-color: rgba(59,130,246,.35)}
     .btn.danger{background: rgba(239,68,68,.18); border-color: rgba(239,68,68,.35)}
     .btn:disabled{opacity:.55; cursor:not-allowed}
-    .input-group{
-      display:flex; gap:8px; margin-top:12px;
-      padding-top:12px; border-top:1px dashed var(--line);
-    }
+
     input[type=text]{
       background: rgba(0,0,0,.2); border:1px solid var(--line);
       color: var(--txt); padding:8px 12px; border-radius:12px;
       outline:none; font-size:13px; width:100%;
     }
     input[type=text]:focus{border-color:var(--blue)}
-    .switch{
-      display:inline-flex; align-items:center; gap:10px;
-      user-select:none;
-    }
+
+    .switch{display:inline-flex; align-items:center; gap:10px; user-select:none;}
     .toggle{
       width:48px; height:28px; border-radius:999px;
       border:1px solid var(--line);
@@ -200,6 +192,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     }
     .toggle.on{background: rgba(34,197,94,.22); border-color: rgba(34,197,94,.35)}
     .toggle.on .knob{left:24px}
+
     .kv{
       display:grid; grid-template-columns: 120px 1fr;
       gap:10px; font-size:13px;
@@ -207,6 +200,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     }
     .kv:last-child{border-bottom:none}
     .k{color:var(--muted)}
+
     pre{
       margin:0; padding:12px;
       background: rgba(0,0,0,.35);
@@ -218,6 +212,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       font-size: 12px;
       line-height: 1.35;
     }
+
     .bigStatus{
       font-size: 16px;
       font-weight: 800;
@@ -231,6 +226,67 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     .bigStatus.bad{border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.12)}
     .mini{font-size:12px; color:var(--muted); margin-top:8px}
     .spacer{height:10px}
+
+    /* --- Modern controls area --- */
+    .controls {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .panel {
+      background: rgba(0,0,0,.18);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 16px;
+      padding: 12px;
+    }
+    .panelTitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 10px;
+      letter-spacing: .2px;
+    }
+    .statusBar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .actionsGrid {
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 700px){
+      .actionsGrid { grid-template-columns: 1fr; }
+    }
+    .btnWide {
+      width: 100%;
+      justify-content: center;
+      padding: 12px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+    }
+    .fieldRow {
+      display:flex;
+      gap: 8px;
+      align-items:center;
+    }
+    .fieldRow input[type=text] {
+      height: 42px;
+      border-radius: 14px;
+    }
+    .btnSmall {
+      padding: 10px 12px;
+      border-radius: 14px;
+      height: 42px;
+      white-space: nowrap;
+    }
+    .secondaryRow {
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
   </style>
 </head>
 <body>
@@ -240,12 +296,8 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
         <div class="logo"></div>
         <div>
           <h1>ESP32-CAM • Face Verify Dashboard</h1>
-          <div class="sub">Live view + Active toggle + Verify passthrough JSON</div>
+          <div class="sub">Modern controls + Live view + Verify/Register passthrough JSON</div>
         </div>
-      </div>
-      <div class="row">
-        <button class="btn" id="btnRefresh">Refresh</button>
-        <button class="btn" id="btnSnap">Capture JPG</button>
       </div>
     </div>
 
@@ -253,43 +305,67 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       <div class="card">
         <div class="cardHeader">
           <div class="h">Live Camera</div>
-          <div class="row">
-            <div class="chip"><span class="dot blue" id="dotLive"></span><span id="liveLabel">LIVE</span></div>
-          </div>
         </div>
+
         <div class="cardBody">
           <div class="videoWrap">
             <img id="cam" alt="camera feed"/>
             <div class="overlay" id="overlay">Inactive or busy…</div>
           </div>
 
-          <div class="spacer"></div>
+          <div class="controls">
 
-          <div class="row" style="justify-content:space-between">
-            <div class="switch">
-              <div class="toggle" id="toggleActive"><div class="knob"></div></div>
-              <div>
-                <div style="font-weight:800">Active</div>
-                <div class="sub" id="activeHint">Device is armed</div>
+            <!-- Status / Active -->
+            <div class="panel">
+              <div class="statusBar">
+                <div class="switch">
+                  <div class="toggle" id="toggleActive"><div class="knob"></div></div>
+                  <div>
+                    <div style="font-weight:800">Active</div>
+                    <div class="sub" id="activeHint">Device is armed</div>
+                  </div>
+                </div>
+
+                <div class="chip">
+                  <span class="dot blue" id="dotLive"></span>
+                  <span id="liveLabel">LIVE</span>
+                </div>
               </div>
             </div>
 
-            <div class="row">
-              <button class="btn primary" id="btnVerify">Verify Now</button>
-              <button class="btn danger" id="btnStop">Stop Live</button>
-              <button class="btn" id="btnStart">Start Live</button>
-            </div>
-          </div>
+            <!-- Primary actions -->
+            <div class="panel">
+              <div class="panelTitle">Actions</div>
+              <div class="actionsGrid">
+                <button class="btn primary btnWide" id="btnVerify">Verify Now</button>
 
-          <div class="input-group">
-            <input type="text" id="regName" placeholder="Enter Name to Register" />
-            <button class="btn" id="btnRegister">Register</button>
+                <div>
+                  <div class="fieldRow">
+                    <input type="text" id="regName" placeholder="Name for registration" />
+                    <button class="btn btnSmall" id="btnRegister">Register</button>
+                  </div>
+                  <div class="sub" style="margin-top:6px;">Tip: Face the camera and keep steady.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Secondary controls -->
+            <div class="panel">
+              <div class="panelTitle">Live Controls</div>
+              <div class="secondaryRow">
+                <button class="btn danger" id="btnStop">Stop Live</button>
+                <button class="btn" id="btnStart">Start Live</button>
+                <button class="btn" id="btnRefresh">Refresh</button>
+                <button class="btn" id="btnSnap">Capture JPG</button>
+              </div>
+            </div>
+
           </div>
 
           <div class="spacer"></div>
 
           <div class="bigStatus" id="bigStatus">Waiting for verify…</div>
-          <div class="mini" id="miniStatus">Tip: Verify will pause live view briefly to avoid camera busy.</div>
+          <div class="mini" id="miniStatus">Tip: Verify/Register pauses live view briefly to avoid camera busy.</div>
         </div>
       </div>
 
@@ -316,7 +392,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 
 <script>
   let liveTimer = null;
-  let liveFps = 6; // smooth enough without killing the ESP32
+  let liveFps = 6;
 
   const $ = (id)=>document.getElementById(id);
 
@@ -338,7 +414,6 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     $("dotLive").className = "dot good";
     setOverlay(false);
 
-    // snapshot loop
     liveTimer = setInterval(()=>{
       $("cam").src = "/capture?t=" + Date.now();
     }, Math.max(120, Math.floor(1000/liveFps)));
@@ -361,7 +436,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 
   function extractStatusText(obj){
     if(!obj || typeof obj !== "object") return "";
-    return obj.text_LCD || obj.message || obj.status || obj.result || "";
+    return obj.text_LCD || obj.message || obj.status || obj.result || obj.raw || "";
   }
 
   function isWelcomeText(s){
@@ -378,32 +453,31 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       $("busy").textContent = st.busy ? "true" : "false";
       $("lerr").textContent = st.lastError || "";
 
-      // active toggle ui
       const t = $("toggleActive");
       t.classList.toggle("on", !!st.active);
       $("activeHint").textContent = st.active ? "Device is armed" : "Device is inactive";
 
-      // state chip
       if(!st.active){
         $("dotState").className = "dot bad";
         $("stateLabel").textContent = "INACTIVE";
         setOverlay(true, "Inactive. Turn Active ON to view & verify.");
+        stopLive(); // keep UI clean when inactive
       }else if(st.busy){
-        $("dotState").className = "dot warn";
+        $("dotState").className = "dot";
         $("stateLabel").textContent = "BUSY";
-        setOverlay(true, "Busy… (verify/capture running)");
+        setOverlay(true, "Busy… (verify/register/capture running)");
       }else{
         $("dotState").className = "dot good";
         $("stateLabel").textContent = "READY";
         setOverlay(false);
       }
 
-      // last json
       $("jsonBox").textContent = pretty(st.last || {});
     }catch(e){
       $("dotState").className = "dot bad";
       $("stateLabel").textContent = "OFFLINE";
       setOverlay(true, "Cannot reach ESP32. Check WiFi/IP.");
+      stopLive();
     }
   }
 
@@ -415,7 +489,6 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
   }
 
   async function verifyNow(){
-    // pause live to avoid camera busy
     const wasLive = !!liveTimer;
     stopLive();
 
@@ -428,7 +501,23 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       $("jsonBox").textContent = pretty(obj);
 
       const msg = extractStatusText(obj) || respText;
-      if(isWelcomeText(msg)){
+
+      if(obj && obj.error){
+        setBigStatus("bad", "Error: " + (obj.error || msg));
+      }else if(isWelcomeText(msg)){
+        setBigStatus("good", msg);
+      }else{
+        setBigStatus("bad", msg || "Not recognized");
+      }
+    }catch(e){
+      setBigStatus("bad", "Verify failed: " + e.message);
+    }finally{
+      $("btnVerify").disabled = false;
+      await refreshState();
+      if(wasLive && $("toggleActive").classList.contains("on")) startLive();
+    }
+  }
+
   async function registerFace(){
     const name = $("regName").value.trim();
     if(!name){ alert("Please enter a name first."); return; }
@@ -440,54 +529,38 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     setBigStatus("", "Registering " + name + "…");
 
     try{
-      // encodeURIComponent ensures spaces and special chars are handled safely
       const url = "/register?name=" + encodeURIComponent(name);
       const respText = await fetch(url, {cache:"no-store"}).then(r=>r.text());
       const obj = parseMaybeJson(respText);
       $("jsonBox").textContent = pretty(obj);
 
       const msg = extractStatusText(obj) || respText;
-      if(obj.error){
+
+      if(obj && obj.error){
         setBigStatus("bad", "Reg Error: " + (obj.error || msg));
-      } else {
-        setBigStatus("good", "Registered: " + msg);
+      }else{
+        setBigStatus("good", msg || ("Registered: " + name));
       }
     }catch(e){
       setBigStatus("bad", "Register failed: " + e.message);
     }finally{
       $("btnRegister").disabled = false;
       await refreshState();
-      if(wasLive) startLive();
+      if(wasLive && $("toggleActive").classList.contains("on")) startLive();
     }
   }
 
-  // wiring UI events
+  // UI events
   $("btnRefresh").onclick = refreshState;
   $("btnStart").onclick = startLive;
   $("btnStop").onclick = stopLive;
 
   $("btnSnap").onclick = ()=>{
-    // opens jpg in new tab
     window.open("/capture?t=" + Date.now(), "_blank");
   };
 
   $("btnVerify").onclick = verifyNow;
-  $("btnRegister").onclick = registerFace
-      if(wasLive) startLive();
-    }
-  }
-
-  // wiring UI events
-  $("btnRefresh").onclick = refreshState;
-  $("btnStart").onclick = startLive;
-  $("btnStop").onclick = stopLive;
-
-  $("btnSnap").onclick = ()=>{
-    // opens jpg in new tab
-    window.open("/capture?t=" + Date.now(), "_blank");
-  };
-
-  $("btnVerify").onclick = verifyNow;
+  $("btnRegister").onclick = registerFace;
 
   $("toggleActive").onclick = async ()=>{
     const isOn = $("toggleActive").classList.contains("on");
@@ -495,34 +568,76 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
   };
 
   $("cam").onerror = ()=>{
-    // if capture returns errors, show overlay
     setOverlay(true, "No frame (inactive/busy). Try Refresh or Active ON.");
   };
 
   // boot
-  refreshState();
-  startLive();
-  setInterval(refreshState, 2500);
+  (async function boot(){
+    await refreshState();
+    if ($("toggleActive").classList.contains("on")) startLive();
+    setInterval(refreshState, 2500);
+  })();
 </script>
 </body>
 </html>
 )HTML";
 
 // -------------------- Helpers --------------------
+static String jsonEscape(const String& s) {
+  String out; out.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '\\') out += "\\\\";
+    else if (c == '"') out += "\\\"";
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else if (c == '\t') out += "\\t";
+    else out += c;
+  }
+  return out;
+}
+
+static String normalizeJson(const String& s) {
+  String t = s;
+  t.trim();
+  if (t.length() == 0) return "{}";
+  if (t[0] == '{' || t[0] == '[') return t;
+  return String("{\"raw\":\"") + jsonEscape(t) + "\"}";
+}
+
 static void sendJson(int code, const String& body) {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Cache-Control", "no-store");
   server.send(code, "application/json", body);
 }
 
+static String urlEncode(const String& s) {
+  const char* hex = "0123456789ABCDEF";
+  String out; out.reserve(s.length() * 3);
+  for (size_t i = 0; i < s.length(); i++) {
+    uint8_t c = (uint8_t)s[i];
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+        c == '-' || c == '_' || c == '.' || c == '~') {
+      out += (char)c;
+    } else {
+      out += '%';
+      out += hex[(c >> 4) & 0xF];
+      out += hex[c & 0xF];
+    }
+  }
+  return out;
+}
+
+// -------------------- Routes --------------------
 void handleHelp() {
   String msg =
     "ESP32-CAM is online.\n\n"
-    "GET /          -> UI dashboard\n"
-    "GET /help      -> this help\n"
-    "GET /capture   -> JPEG frame\n"
-    "GET /verify    -> capture + POST to FACE_API_URL + return JSON\n"
-    "GET /state     -> state JSON\n"
+    "GET /                 -> UI dashboard\n"
+    "GET /help             -> this help\n"
+    "GET /capture          -> JPEG frame\n"
+    "GET /verify           -> capture + POST to FACE_API_URL + return JSON\n"
+    "GET /register?name=.. -> capture + POST to REGISTER_API_BASE + name\n"
+    "GET /state            -> state JSON\n"
     "GET /active?enable=1|0\n";
   server.send(200, "text/plain", msg);
 }
@@ -548,7 +663,7 @@ void handleState() {
   json += "\"busy\":" + String(g_busy ? "true" : "false") + ",";
   json += "\"lastAtMs\":" + String(g_lastMs) + ",";
   json += "\"last\":" + g_lastJson + ",";
-  json += "\"lastError\":\"" + g_lastErr + "\"";
+  json += "\"lastError\":\"" + jsonEscape(g_lastErr) + "\"";
   json += "}";
   sendJson(200, json);
 }
@@ -581,8 +696,8 @@ void handleCapture() {
   xSemaphoreGive(camMutex);
 }
 
-// Captures a JPEG and POSTs it to FACE_API_URL as raw bytes (Content-Type: image/jpeg).
-String postFrameToFaceServer(camera_fb_t* fb, int &outHttpCode, const char* targetUrl = FACE_API_URL) {
+// Captures a JPEG and POSTs it to targetUrl as raw bytes (Content-Type: image/jpeg).
+String postFrameToFaceServer(camera_fb_t* fb, int &outHttpCode, const char* targetUrl) {
   HTTPClient http;
   WiFiClient client;
 
@@ -635,18 +750,18 @@ void handleVerify() {
   }
 
   int faceHttp = 0;
-  String faceResp = postFrameToFaceServer(fb, faceHttp);
+  String faceResp = postFrameToFaceServer(fb, faceHttp, FACE_API_URL);
 
   esp_camera_fb_return(fb);
   xSemaphoreGive(camMutex);
 
   g_lastMs = millis();
-  g_lastJson = faceResp;
+  g_lastJson = normalizeJson(faceResp);
   if (faceHttp != 200) g_lastErr = "face_http_" + String(faceHttp);
 
   g_busy = false;
 
-  // passthrough JSON
+  // passthrough (raw server response)
   sendJson(200, faceResp);
 }
 
@@ -654,15 +769,9 @@ void handleRegister() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Cache-Control", "no-store");
 
-  if (!server.hasArg("name")) {
-    sendJson(400, "{\"error\":\"missing_name\"}");
-    return;
-  }
+  if (!server.hasArg("name")) { sendJson(400, "{\"error\":\"missing_name\"}"); return; }
   String name = server.arg("name");
-  if (name.length() == 0) {
-    sendJson(400, "{\"error\":\"empty_name\"}");
-    return;
-  }
+  if (name.length() == 0)      { sendJson(400, "{\"error\":\"empty_name\"}"); return; }
 
   if (!g_active) { server.send(503, "text/plain", "Inactive"); return; }
   if (g_busy)    { server.send(503, "text/plain", "Busy"); return; }
@@ -688,25 +797,24 @@ void handleRegister() {
     return;
   }
 
-  int faceHttp = 0;
-  String url = String(REGISTER_API_BASE) + name;
-  // URL encode the name if necessary? For now assuming simple names.
-  // Better to replace spaces with %20 manually if needed, but let's assume user inputs valid URL chars or browser handles it.
-  
-  String faceResp = postFrameToFaceServer(fb, faceHttp, url.c_str());
+  int regHttp = 0;
+  String url = String(REGISTER_API_BASE) + urlEncode(name);
+  String regResp = postFrameToFaceServer(fb, regHttp, url.c_str());
 
   esp_camera_fb_return(fb);
   xSemaphoreGive(camMutex);
 
   g_lastMs = millis();
-  g_lastJson = faceResp;
-  if (faceHttp != 200) g_lastErr = "register_http_" + String(faceHttp);
+  g_lastJson = normalizeJson(regResp);
+  if (regHttp != 200) g_lastErr = "register_http_" + String(regHttp);
 
   g_busy = false;
 
-  sendJson(200, faceResp);
+  // passthrough (raw server response)
+  sendJson(200, regResp);
 }
 
+// -------------------- Setup / Loop --------------------
 void setup() {
   Serial.begin(115200);
   delay(200);
