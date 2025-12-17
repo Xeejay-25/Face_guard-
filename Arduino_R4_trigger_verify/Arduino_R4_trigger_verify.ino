@@ -28,7 +28,7 @@ const char* WIFI_SSID = "esp32";
 const char* WIFI_PASS = "12345678";
 
 // Put the ESP32's IP here (print in ESP32 Serial Monitor)
-const char* ESP32_HOST = "192.168.137.155";
+const char* ESP32_HOST = "192.168.137.95";
 const uint16_t ESP32_PORT = 80;
 
 // ===================== Distance rules =====================
@@ -240,6 +240,7 @@ String extractJsonStringValue(const String& json, const char* key) {
   if (p < 0) return "";
 
   p += k.length();
+  // Skip whitespace
   while (p < (int)json.length() && (json[p] == ' ' || json[p] == '\n' || json[p] == '\r' || json[p] == '\t')) p++;
 
   if (p >= (int)json.length() || json[p] != '"') return "";
@@ -248,13 +249,22 @@ String extractJsonStringValue(const String& json, const char* key) {
   String out;
   while (p < (int)json.length()) {
     char c = json[p++];
-    if (c == '\\') { // minimal escape handling
-      if (p < (int)json.length()) out += json[p++];
+    if (c == '\\') { // escape handling
+      if (p < (int)json.length()) {
+        char next = json[p++];
+        if (next == 'n') out += ' '; // replace newlines with space for LCD
+        else if (next == 'r') out += ' ';
+        else if (next == 't') out += ' ';
+        else out += next;
+      }
       continue;
     }
     if (c == '"') break;
-    out += c;
+    // Clean up control characters for LCD display
+    if (c >= 32 && c <= 126) out += c;
+    else out += ' ';
   }
+  out.trim();
   return out;
 }
 
@@ -302,33 +312,76 @@ void setup() {
   lcdShow("BOOTING...", "WiFi connect");
   delay(500);
 
-  // WiFi
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(350);
-    Serial.print(".");
-    if (millis() - start > 20000) break;
+  // WiFi connection with retry and reset
+  int wifiAttempts = 0;
+  const int MAX_WIFI_ATTEMPTS = 3;
+  
+  while (WiFi.status() != WL_CONNECTED && wifiAttempts < MAX_WIFI_ATTEMPTS) {
+    wifiAttempts++;
+    lcdShow("WiFi Attempt", String("Try ") + wifiAttempts + "/" + MAX_WIFI_ATTEMPTS);
+    
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    unsigned long start = millis();
+    
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(350);
+      Serial.print(".");
+      if (millis() - start > 15000) break; // 15 second timeout per attempt
+    }
+    Serial.println();
+    
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("WiFi attempt failed");
+      delay(1000);
+      WiFi.disconnect();
+      delay(500);
+    }
   }
-  Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("R4 IP: "); Serial.println(WiFi.localIP());
     
-    // Check ESP32 connection
+    // Check ESP32 connection with retry loop
     lcdShow("CHECKING ESP32", "Please wait...");
-    delay(500);
-    if (espSetActive(true)) {
-      Serial.println("ESP32 connection OK");
-      lcdShow("READY", "Stand <= 30cm");
-    } else {
-      Serial.println("ESP32 connection FAILED");
-      lcdShow("ESP32 FAIL", "Check IP/Power");
-      setColor(255, 0, 0);
+    delay(800);
+    
+    bool esp32Connected = false;
+    int esp32Attempts = 0;
+    const int MAX_ESP32_ATTEMPTS = 5;
+    
+    while (!esp32Connected && esp32Attempts < MAX_ESP32_ATTEMPTS) {
+      esp32Attempts++;
+      lcdShow("ESP32 Check", String("Try ") + esp32Attempts + "/" + MAX_ESP32_ATTEMPTS);
+      Serial.print("ESP32 attempt "); Serial.print(esp32Attempts); Serial.println("...");
+      
+      if (espSetActive(true)) {
+        esp32Connected = true;
+        Serial.println("ESP32 connection OK");
+        lcdShow("CONNECTED!", "System Ready");
+        setColor(0, 255, 0);
+        delay(1500);
+        lcdShow("READY", "Stand <= 30cm");
+      } else {
+        Serial.println("ESP32 connection attempt failed");
+        delay(1500);
+        
+        if (esp32Attempts >= MAX_ESP32_ATTEMPTS) {
+          Serial.println("ESP32 connection FAILED after all attempts");
+          lcdShow("ESP32 FAIL", "Check IP/Power");
+          setColor(255, 0, 0);
+          delay(3000);
+          // Optional: Reset Arduino after critical failure
+          // NVIC_SystemReset(); // Uncomment to enable auto-reset
+        }
+      }
     }
   } else {
-    lcdShow("WIFI FAIL", "Check SSID");
+    Serial.println("WiFi FAILED after all attempts");
+    lcdShow("WIFI FAIL", "Restarting...");
     setColor(255, 0, 0);
+    delay(3000);
+    // Reset to retry from beginning
+    NVIC_SystemReset();
   }
 }
 
@@ -377,9 +430,12 @@ void loop() {
       if (fabs(dist - lastShownDist) > 2.0f) {
         lcdShow("PLEASE WAIT", "Dist:" + String((int)dist) + "cm");
         lastShownDist = dist;
+        delay(100); // LCD update delay
       }
       return;
     }
+    // Transition delay
+    delay(200);
     stableHits = 0;
     state = TOO_FAR;
   }
@@ -393,6 +449,7 @@ void loop() {
     if (fabs(dist - lastShownDist) > 1.0f) {
       lcdShow("TOO FAR", "Need <= 30cm");
       lastShownDist = dist;
+      delay(150); // LCD update delay
     }
     return;
   }
@@ -403,6 +460,7 @@ void loop() {
     stableHits = 0;
     lcdShow("GOOD RANGE", "Hold still...");
     setColor(0, 80, 255);
+    delay(250); // State transition delay
   }
 
   stableHits++;
@@ -424,18 +482,44 @@ void loop() {
   Serial.println("VERIFY JSON:");
   Serial.println(json);
 
-  if (!ok) {
+  delay(300); // Brief delay before processing result
+
+  if (!ok || json.length() < 5) {
     lastPass = false;
-    startResultDisplay("FAIL: No response from ESP32");
+    String errMsg = "FAIL: No response from ESP32 - Check connection";
+    startResultDisplay(errMsg);
     setColor(255, 0, 0);
+    Serial.println(errMsg);
   } else {
     lastPass = inferPassFromJson(json);
 
+    // Try multiple JSON keys for display text
     String text = extractJsonStringValue(json, "text_LCD");
-    if (text.length() == 0) text = "No text_LCD in JSON";
+    if (text.length() == 0) text = extractJsonStringValue(json, "message");
+    if (text.length() == 0) text = extractJsonStringValue(json, "result");
+    if (text.length() == 0) text = extractJsonStringValue(json, "status");
+    
+    // If still no text, provide meaningful default
+    if (text.length() == 0) {
+      if (lastPass) {
+        text = "Welcome! Access Granted";
+      } else {
+        text = "Access Denied - Face not recognized";
+      }
+    }
+    
+    // Clean up text for better LCD display
+    text.replace("\\n", " ");
+    text.replace("\\r", "");
+    text.trim();
+    
+    Serial.print("Display text: ");
+    Serial.println(text);
+    
     startResultDisplay(text);
-
     setColor(lastPass ? 0 : 255, lastPass ? 255 : 0, 0);
+    
+    delay(500); // Allow LCD to update
   }
 
   state = SHOW_RESULT;
