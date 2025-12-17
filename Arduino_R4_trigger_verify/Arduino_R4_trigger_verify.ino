@@ -300,6 +300,7 @@ void setup() {
   lcd.begin();
   lcd.backlight();
   lcdShow("BOOTING...", "WiFi connect");
+  delay(500);
 
   // WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -316,6 +317,7 @@ void setup() {
     
     // Check ESP32 connection
     lcdShow("CHECKING ESP32", "Please wait...");
+    delay(500);
     if (espSetActive(true)) {
       Serial.println("ESP32 connection OK");
       lcdShow("READY", "Stand <= 30cm");
