@@ -47,8 +47,12 @@ const unsigned long COOLDOWN_MS = 4500;
 const unsigned long RESULT_HOLD_MS = 10000;
 
 // ===================== State machine =====================
-enum State { IDLE, TOO_FAR, READY_STABLE, TESTING, SHOW_RESULT, COOLDOWN };
+enum State { IDLE, TOO_CLOSE, TOO_FAR, READY_STABLE, TESTING, SHOW_RESULT, COOLDOWN };
 State state = IDLE;
+
+// ===================== WiFi check interval =====================
+unsigned long lastWiFiCheck = 0;
+const unsigned long WIFI_CHECK_INTERVAL_MS = 3000; // Check WiFi every 5 seconds
 
 int stableHits = 0;
 unsigned long stateUntil = 0;
@@ -296,6 +300,39 @@ bool inferPassFromJson(const String& json) {
   return false;
 }
 
+// ===================== WiFi reconnect helper =====================
+void checkAndReconnectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  
+  Serial.println("WiFi disconnected! Attempting reconnect...");
+  lcdShow("WiFi Lost!", "Reconnecting...");
+  setColor(255, 165, 0); // Orange
+  
+  WiFi.disconnect();
+  delay(500);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+    delay(350);
+    Serial.print(".");
+  }
+  Serial.println();
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("WiFi reconnected!");
+    Serial.print("IP: "); Serial.println(WiFi.localIP());
+    lcdShow("WiFi OK!", "Resuming...");
+    setColor(0, 255, 0);
+    delay(1000);
+  } else {
+    Serial.println("WiFi reconnect failed!");
+    lcdShow("WiFi FAIL", "Will retry...");
+    setColor(255, 0, 0);
+    delay(2000);
+  }
+}
+
 // ===================== Setup / Loop =====================
 void setup() {
   Serial.begin(115200);
@@ -388,6 +425,12 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
+  // ===================== WiFi check =====================
+  if (now - lastWiFiCheck >= WIFI_CHECK_INTERVAL_MS) {
+    lastWiFiCheck = now;
+    checkAndReconnectWiFi();
+  }
+
   float dist = smoothDistanceCM(5);
 
   // presence detection
@@ -440,6 +483,20 @@ void loop() {
     state = TOO_FAR;
   }
 
+  // ===================== TOO CLOSE =====================
+  if (dist > 0 && dist < MIN_CM) {
+    state = TOO_CLOSE;
+    stableHits = 0;
+
+    setColor(255, 100, 0); // Orange-red
+    if (fabs(dist - lastShownDist) > 1.0f) {
+      lcdShow("TOO CLOSE!", "Step back a bit");
+      lastShownDist = dist;
+      delay(150); // LCD update delay
+    }
+    return;
+  }
+
   // ===================== TOO FAR =====================
   if (!inGoodRange) {
     state = TOO_FAR;
@@ -447,8 +504,7 @@ void loop() {
 
     setColor(255, 0, 0);
     if (fabs(dist - lastShownDist) > 1.0f) {
-      String distMsg = "Dist: " + String((int)dist) + "cm";
-      lcdShow("TOO FAR", distMsg);
+      lcdShow("TOO FAR", "Need <= 40cm");
       lastShownDist = dist;
       delay(150); // LCD update delay
     }
@@ -459,9 +515,7 @@ void loop() {
   if (state != READY_STABLE) {
     state = READY_STABLE;
     stableHits = 0;
-    lastShownDist = dist;
-    String distMsg = "Dist: " + String((int)dist) + "cm";
-    lcdShow("GOOD RANGE", distMsg);
+    lcdShow("GOOD RANGE", "Hold still...");
     setColor(0, 80, 255);
     delay(250); // State transition delay
   }
@@ -469,11 +523,6 @@ void loop() {
   stableHits++;
   if (stableHits < IN_RANGE_HITS_REQUIRED) {
     setColor(0, 80, 255);
-    if (fabs(dist - lastShownDist) > 1.0f) {
-      String distMsg = "Dist: " + String((int)dist) + "cm";
-      lcdShow("GOOD RANGE", distMsg);
-      lastShownDist = dist;
-    }
     return;
   }
 
