@@ -489,7 +489,8 @@ void loop() {
 
     setColor(255, 100, 0); // Orange-red
     if (fabs(dist - lastShownDist) > 1.0f) {
-      lcdShow("TOO CLOSE!", "Step back a bit");
+      String distMsg = "Dist: " + String((int)dist) + "cm";
+      lcdShow("TOO CLOSE!", distMsg);
       lastShownDist = dist;
       delay(150); // LCD update delay
     }
