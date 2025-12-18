@@ -32,7 +32,7 @@ const char* ESP32_HOST = "192.168.137.108";
 const uint16_t ESP32_PORT = 80;
 
 // ===================== Distance rules =====================
-const float MIN_CM = 5.0f;            // ignore too-close noise
+const float MIN_CM = 30.0f;           // minimum detection distance (below = too close)
 const float GOOD_CM = 40.0f;          // GOOD RANGE upper limit
 const float FAR_CM  = 80.0f;          // presence detection limit
 const float HYSTERESIS_CM = 2.5f;     // reduce flicker near boundary
