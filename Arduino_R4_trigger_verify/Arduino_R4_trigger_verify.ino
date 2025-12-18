@@ -386,7 +386,7 @@ void setup() {
     int esp32Attempts = 0;
     const int MAX_ESP32_ATTEMPTS = 5;
     
-    while (!esp32Connected && esp32Attempts < MAX_ESP32_ATTEMPTS) {
+    while (!esp32Connected) {
       esp32Attempts++;
       lcdShow("ESP32 Check", String("Try ") + esp32Attempts + "/" + MAX_ESP32_ATTEMPTS);
       Serial.print("ESP32 attempt "); Serial.print(esp32Attempts); Serial.println("...");
@@ -403,12 +403,11 @@ void setup() {
         delay(1500);
         
         if (esp32Attempts >= MAX_ESP32_ATTEMPTS) {
-          Serial.println("ESP32 connection FAILED after all attempts");
-          lcdShow("ESP32 FAIL", "Check IP/Power");
-          setColor(255, 0, 0);
-          delay(3000);
-          // Optional: Reset Arduino after critical failure
-          // NVIC_SystemReset(); // Uncomment to enable auto-reset
+          Serial.println("ESP32 connection FAILED - Resetting to attempt 1");
+          lcdShow("ESP32 FAIL", "Retry from 1...");
+          setColor(255, 165, 0); // Orange
+          delay(2000);
+          esp32Attempts = 0; // Reset counter to loop again
         }
       }
     }
