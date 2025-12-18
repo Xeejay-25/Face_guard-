@@ -447,7 +447,8 @@ void loop() {
 
     setColor(255, 0, 0);
     if (fabs(dist - lastShownDist) > 1.0f) {
-      lcdShow("TOO FAR", "Need <= 40cm");
+      String distMsg = "Dist: " + String((int)dist) + "cm";
+      lcdShow("TOO FAR", distMsg);
       lastShownDist = dist;
       delay(150); // LCD update delay
     }
@@ -458,7 +459,9 @@ void loop() {
   if (state != READY_STABLE) {
     state = READY_STABLE;
     stableHits = 0;
-    lcdShow("GOOD RANGE", "Hold still...");
+    lastShownDist = dist;
+    String distMsg = "Dist: " + String((int)dist) + "cm";
+    lcdShow("GOOD RANGE", distMsg);
     setColor(0, 80, 255);
     delay(250); // State transition delay
   }
@@ -466,6 +469,11 @@ void loop() {
   stableHits++;
   if (stableHits < IN_RANGE_HITS_REQUIRED) {
     setColor(0, 80, 255);
+    if (fabs(dist - lastShownDist) > 1.0f) {
+      String distMsg = "Dist: " + String((int)dist) + "cm";
+      lcdShow("GOOD RANGE", distMsg);
+      lastShownDist = dist;
+    }
     return;
   }
 
