@@ -52,7 +52,13 @@ State state = IDLE;
 
 // ===================== WiFi check interval =====================
 unsigned long lastWiFiCheck = 0;
-const unsigned long WIFI_CHECK_INTERVAL_MS = 3000; // Check WiFi every 5 seconds
+const unsigned long WIFI_CHECK_INTERVAL_MS = 3000; // Check WiFi every 3 seconds
+
+// ===================== ESP32 check interval =====================
+unsigned long lastESP32Check = 0;
+const unsigned long ESP32_CHECK_INTERVAL_MS = 10000; // Check ESP32 every 10 seconds
+int esp32FailCount = 0;
+const int ESP32_MAX_FAILS = 3; // Reset after 3 consecutive failures
 
 int stableHits = 0;
 unsigned long stateUntil = 0;
@@ -338,6 +344,34 @@ void checkAndReconnectWiFi() {
   }
 }
 
+// ===================== ESP32 connection check =====================
+void checkESP32Connection() {
+  Serial.println("Checking ESP32 connection...");
+  
+  if (espSetActive(true)) {
+    Serial.println("ESP32 check: OK");
+    esp32FailCount = 0; // Reset fail counter on success
+    return;
+  }
+  
+  // ESP32 check failed
+  esp32FailCount++;
+  Serial.print("ESP32 check FAILED! Fail count: ");
+  Serial.println(esp32FailCount);
+  
+  if (esp32FailCount >= ESP32_MAX_FAILS) {
+    Serial.println("ESP32 disconnected - Resetting system...");
+    lcdShow("ESP32 LOST!", "Resetting...");
+    setColor(255, 0, 0);
+    delay(2000);
+    NVIC_SystemReset(); // Reset Arduino to go back to setup
+  } else {
+    lcdShow("ESP32 Warning", String("Fail ") + esp32FailCount + "/" + ESP32_MAX_FAILS);
+    setColor(255, 165, 0); // Orange warning
+    delay(500);
+  }
+}
+
 // ===================== Setup / Loop =====================
 void setup() {
   Serial.begin(115200);
@@ -433,6 +467,12 @@ void loop() {
   if (now - lastWiFiCheck >= WIFI_CHECK_INTERVAL_MS) {
     lastWiFiCheck = now;
     checkAndReconnectWiFi();
+  }
+
+  // ===================== ESP32 check =====================
+  if (now - lastESP32Check >= ESP32_CHECK_INTERVAL_MS) {
+    lastESP32Check = now;
+    checkESP32Connection();
   }
 
   float dist = smoothDistanceCM(5);
