@@ -1,6 +1,6 @@
 
 // Arduino UNO R4 WiFi - distance trigger -> request JSON from ESP32-CAM over WiFi
-// GOOD RANGE: 5cm to 30cm
+// GOOD RANGE: 5cm to 40cm
 // Shows result for 5 seconds, and if the result text is long, it scrolls (marquee) left-to-right.
 
 #include <Wire.h>
@@ -33,7 +33,7 @@ const uint16_t ESP32_PORT = 80;
 
 // ===================== Distance rules =====================
 const float MIN_CM = 5.0f;            // ignore too-close noise
-const float GOOD_CM = 30.0f;          // GOOD RANGE upper limit
+const float GOOD_CM = 40.0f;          // GOOD RANGE upper limit
 const float FAR_CM  = 80.0f;          // presence detection limit
 const float HYSTERESIS_CM = 2.5f;     // reduce flicker near boundary
 
@@ -112,7 +112,7 @@ void lcdIdleScroll(unsigned long now) {
   lcd.print(displayMsg.substring(0,16));
 
   lcd.setCursor(0, 1);
-  lcd.print("Stand <= 30cm   ");
+  lcd.print("Stand <= 40cm   ");
 
   textPos = (textPos + 1) % len;
 }
@@ -360,7 +360,7 @@ void setup() {
         lcdShow("CONNECTED!", "System Ready");
         setColor(0, 255, 0);
         delay(1500);
-        lcdShow("READY", "Stand <= 30cm");
+        lcdShow("READY", "Stand <= 40cm");
       } else {
         Serial.println("ESP32 connection attempt failed");
         delay(1500);
@@ -447,7 +447,7 @@ void loop() {
 
     setColor(255, 0, 0);
     if (fabs(dist - lastShownDist) > 1.0f) {
-      lcdShow("TOO FAR", "Need <= 30cm");
+      lcdShow("TOO FAR", "Need <= 40cm");
       lastShownDist = dist;
       delay(150); // LCD update delay
     }
