@@ -28,7 +28,7 @@ const char* WIFI_SSID = "esp32";
 const char* WIFI_PASS = "12345678";
 
 // Put the ESP32's IP here (print in ESP32 Serial Monitor)
-const char* ESP32_HOST = "192.168.137.95";
+const char* ESP32_HOST = "192.168.137.108";
 const uint16_t ESP32_PORT = 80;
 
 // ===================== Distance rules =====================
