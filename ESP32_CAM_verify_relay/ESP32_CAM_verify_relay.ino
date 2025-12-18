@@ -49,6 +49,7 @@ SemaphoreHandle_t camMutex;
 
 bool g_active = true;
 bool g_busy   = false;
+bool g_streaming = false;
 
 unsigned long g_lastMs = 0;
 String g_lastJson = "{\"status\":\"none\"}"; // always valid JSON for /state
@@ -461,7 +462,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
         $("dotState").className = "dot bad";
         $("stateLabel").textContent = "INACTIVE";
         setOverlay(true, "Inactive. Turn Active ON to view & verify.");
-        stopLive(); // keep UI clean when inactive
+        stopLive();
       }else if(st.busy){
         $("dotState").className = "dot";
         $("stateLabel").textContent = "BUSY";
@@ -470,6 +471,13 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
         $("dotState").className = "dot good";
         $("stateLabel").textContent = "READY";
         setOverlay(false);
+      }
+
+      // Auto-start/stop live stream based on streaming state
+      if(st.streaming && !liveTimer && st.active && !st.busy){
+        startLive();
+      }else if(!st.streaming && liveTimer){
+        stopLive();
       }
 
       $("jsonBox").textContent = pretty(st.last || {});
@@ -638,7 +646,8 @@ void handleHelp() {
     "GET /verify           -> capture + POST to FACE_API_URL + return JSON\n"
     "GET /register?name=.. -> capture + POST to REGISTER_API_BASE + name\n"
     "GET /state            -> state JSON\n"
-    "GET /active?enable=1|0\n";
+    "GET /active?enable=1|0\n"
+    "GET /stream?enable=1|0\n";
   server.send(200, "text/plain", msg);
 }
 
@@ -655,12 +664,21 @@ void handleActive() {
   sendJson(200, String("{\"active\":") + (g_active ? "true" : "false") + "}");
 }
 
+void handleStream() {
+  if (server.hasArg("enable")) {
+    String v = server.arg("enable");
+    g_streaming = (v == "1" || v == "true");
+  }
+  sendJson(200, String("{\"streaming\":") + (g_streaming ? "true" : "false") + "}");
+}
+
 void handleState() {
   String json = "{";
   json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
   json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
   json += "\"active\":" + String(g_active ? "true" : "false") + ",";
   json += "\"busy\":" + String(g_busy ? "true" : "false") + ",";
+  json += "\"streaming\":" + String(g_streaming ? "true" : "false") + ",";
   json += "\"lastAtMs\":" + String(g_lastMs) + ",";
   json += "\"last\":" + g_lastJson + ",";
   json += "\"lastError\":\"" + jsonEscape(g_lastErr) + "\"";
@@ -865,6 +883,7 @@ void setup() {
   server.on("/", handleUI);
   server.on("/help", handleHelp);
   server.on("/active", handleActive);
+  server.on("/stream", handleStream);
   server.on("/state", handleState);
   server.on("/capture", handleCapture);
   server.on("/verify", handleVerify);

@@ -232,6 +232,11 @@ bool espSetActive(bool enable) {
   return body.length() > 0;
 }
 
+bool espSetStreaming(bool enable) {
+  String body = httpGET(String("/stream?enable=") + (enable ? "1" : "0"), 2000);
+  return body.length() > 0;
+}
+
 bool espVerify(String &outJson) {
   outJson = httpGET("/verify", 28000); // capture + upload + inference
   return outJson.length() > 0;
@@ -438,7 +443,10 @@ void loop() {
   // ===================== IDLE =====================
   if (!detected) {
     stableHits = 0;
-    state = IDLE;
+    if (state != IDLE) {
+      state = IDLE;
+      espSetStreaming(false); // Turn off streaming when no one detected
+    }
 
     if (now - lastLEDUpdate > 25) {
       rainbowStep();
@@ -446,6 +454,11 @@ void loop() {
     }
     lcdIdleScroll(now);
     return;
+  }
+
+  // Person detected - enable streaming
+  if (state == IDLE) {
+    espSetStreaming(true); // Turn on streaming when someone is detected
   }
 
   // GOOD RANGE check: between MIN_CM and GOOD_CM (with hysteresis)
