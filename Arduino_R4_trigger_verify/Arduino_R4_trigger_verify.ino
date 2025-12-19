@@ -677,7 +677,7 @@ void loop() {
   for (int countdown = 3; countdown >= 1; countdown--) {
     String countStr = String(countdown);
     lcdShow(centerText("GET READY!"), centerText(countStr));
-    setColor(0, 0, 255); // Blue for checking/verifying
+    setColor(255, 255, 255);; // Blue for checking/verifying
     delay(1000); // 1 second per count
   }
 
