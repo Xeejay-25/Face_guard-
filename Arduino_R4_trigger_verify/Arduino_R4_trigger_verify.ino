@@ -34,7 +34,7 @@ const uint16_t ESP32_PORT = 80;
 // ===================== Distance rules =====================
 const float MIN_CM = 30.0f;           // minimum detection distance (below = too close)
 const float GOOD_CM = 40.0f;          // GOOD RANGE upper limit
-const float FAR_CM  = 80.0f;          // presence detection limit
+const float FAR_CM  = 70.0f;          // presence detection limit
 const float HYSTERESIS_CM = 2.5f;     // reduce flicker near boundary
 
 // Must be in-range for N loops before triggering
@@ -65,6 +65,7 @@ unsigned long stateUntil = 0;
 
 bool lastPass = false;
 float lastShownDist = -999;
+bool streamingActive = false; // Track streaming state
 
 // ===================== LED helpers =====================
 void setColor(int r, int g, int b) {
@@ -97,8 +98,20 @@ void rainbowStep() {
 }
 
 // ===================== LCD helpers =====================
-String idleMessage = " Identity Guard  Stand Here     ";
+String idleMessage = "    IDENTITY GUARD      FACE RECOGNITION    ";
 int textPos = 0;
+
+// Helper to center text on 16-char LCD line
+String centerText(const String& text, int width = 16) {
+  int len = text.length();
+  if (len >= width) return text.substring(0, width);
+  int leftPad = (width - len) / 2;
+  String result = "";
+  for (int i = 0; i < leftPad; i++) result += " ";
+  result += text;
+  while (result.length() < width) result += " ";
+  return result;
+}
 
 void lcdShow(const String& line1, const String& line2) {
   lcd.clear();
@@ -122,7 +135,7 @@ void lcdIdleScroll(unsigned long now) {
   lcd.print(displayMsg.substring(0,16));
 
   lcd.setCursor(0, 1);
-  lcd.print("Stand <= 40cm   ");
+  lcd.print(" Stand <= 40cm  ");
 
   textPos = (textPos + 1) % len;
 }
@@ -341,8 +354,8 @@ void checkAndReconnectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
   
   Serial.println("WiFi disconnected! Attempting reconnect...");
-  lcdShow("WiFi Lost!", "Reconnecting...");
-  setColor(255, 165, 0); // Orange
+  lcdShow(centerText("WiFi Lost!"), centerText("Reconnecting"));
+  setColor(255, 255, 0); // Yellow
   
   WiFi.disconnect();
   delay(500);
@@ -358,12 +371,12 @@ void checkAndReconnectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("WiFi reconnected!");
     Serial.print("IP: "); Serial.println(WiFi.localIP());
-    lcdShow("WiFi OK!", "Resuming...");
+    lcdShow(centerText("WiFi OK!"), centerText("Resuming..."));
     setColor(0, 255, 0);
     delay(1000);
   } else {
     Serial.println("WiFi reconnect failed!");
-    lcdShow("WiFi FAIL", "Will retry...");
+    lcdShow(centerText("WiFi FAILED"), centerText("Will retry"));
     setColor(255, 0, 0);
     delay(2000);
   }
@@ -408,12 +421,13 @@ void checkESP32Connection() {
   
   if (esp32FailCount >= ESP32_MAX_FAILS) {
     Serial.println("ESP32 disconnected - Resetting system...");
-    lcdShow("ESP32 LOST!", "Resetting...");
+    lcdShow(centerText("ESP32 LOST!"), centerText("Resetting..."));
     setColor(255, 0, 0);
     delay(2000);
     NVIC_SystemReset(); // Reset Arduino to go back to setup
   } else {
-    lcdShow("ESP32 Warning", String("Fail ") + esp32FailCount + "/" + ESP32_MAX_FAILS);
+    String failMsg = "Fails: " + String(esp32FailCount) + "/" + String(ESP32_MAX_FAILS);
+    lcdShow(centerText("ESP32 Warning"), centerText(failMsg));
     setColor(255, 255, 0); // Yellow for warning
     delay(1000);
   }
@@ -432,7 +446,7 @@ void setup() {
 
   lcd.begin();
   lcd.backlight();
-  lcdShow("BOOTING...", "WiFi connect");
+  lcdShow(centerText("BOOTING..."), centerText("WiFi connect"));
   delay(500);
 
   // WiFi connection with retry and reset
@@ -441,7 +455,8 @@ void setup() {
   
   while (WiFi.status() != WL_CONNECTED && wifiAttempts < MAX_WIFI_ATTEMPTS) {
     wifiAttempts++;
-    lcdShow("WiFi Attempt", String("Try ") + wifiAttempts + "/" + MAX_WIFI_ATTEMPTS);
+    String attemptMsg = "Try " + String(wifiAttempts) + "/" + String(MAX_WIFI_ATTEMPTS);
+    lcdShow(centerText("WiFi Attempt"), centerText(attemptMsg));
     
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     unsigned long start = millis();
@@ -465,7 +480,7 @@ void setup() {
     Serial.print("R4 IP: "); Serial.println(WiFi.localIP());
     
     // Check ESP32 connection with retry loop
-    lcdShow("CHECKING ESP32", "Please wait...");
+    lcdShow(centerText("CHECKING ESP32"), centerText("Please wait"));
     delay(800);
     
     bool esp32Connected = false;
@@ -474,23 +489,24 @@ void setup() {
     
     while (!esp32Connected) {
       esp32Attempts++;
-      lcdShow("ESP32 Check", String("Try ") + esp32Attempts + "/" + MAX_ESP32_ATTEMPTS);
+      String attemptMsg = "Try " + String(esp32Attempts) + "/" + String(MAX_ESP32_ATTEMPTS);
+      lcdShow(centerText("ESP32 Check"), centerText(attemptMsg));
       Serial.print("ESP32 attempt "); Serial.print(esp32Attempts); Serial.println("...");
       
       if (espSetActive(true)) {
         esp32Connected = true;
         Serial.println("ESP32 connection OK");
-        lcdShow("CONNECTED!", "System Ready");
+        lcdShow(centerText("CONNECTED!"), centerText("System Ready"));
         setColor(0, 255, 0); // Green for good connection
         delay(1500);
-        lcdShow("READY", "Stand <= 40cm");
+        lcdShow(centerText("READY"), centerText("Stand <= 40cm"));
       } else {
         Serial.println("ESP32 connection attempt failed");
         delay(1500);
         
         if (esp32Attempts >= MAX_ESP32_ATTEMPTS) {
           Serial.println("ESP32 connection FAILED - Resetting to attempt 1");
-          lcdShow("ESP32 FAIL", "Retry from 1...");
+          lcdShow(centerText("ESP32 FAILED"), centerText("Retrying..."));
           setColor(255, 255, 0); // Yellow for waiting
           delay(2000);
           esp32Attempts = 0; // Reset counter to loop again
@@ -499,7 +515,7 @@ void setup() {
     }
   } else {
     Serial.println("WiFi FAILED after all attempts");
-    lcdShow("WIFI FAIL", "Restarting...");
+    lcdShow(centerText("WiFi FAILED"), centerText("Restarting..."));
     setColor(255, 0, 0);
     delay(3000);
     // Reset to retry from beginning
@@ -532,10 +548,15 @@ void loop() {
     stableHits = 0;
     if (state != IDLE) {
       state = IDLE;
-      espSetStreaming(false); // Turn off streaming when no one detected
+    }
+    // Turn off streaming when no one detected
+    if (streamingActive) {
+      espSetStreaming(false);
+      streamingActive = false;
+      Serial.println("[STREAM] Camera live feed stopped - No person detected");
     }
 
-    if (now - lastLEDUpdate > 25) {
+    if (now - lastLEDUpdate > 10) { // Faster RGB transition (changed from 25 to 10)
       rainbowStep();
       lastLEDUpdate = now;
     }
@@ -543,9 +564,13 @@ void loop() {
     return;
   }
 
-  // Person detected - enable streaming
-  if (state == IDLE) {
-    espSetStreaming(true); // Turn on streaming when someone is detected
+  // Person detected within 70cm - enable streaming
+  if (!streamingActive) {
+    espSetStreaming(true);
+    streamingActive = true;
+    Serial.print("[STREAM] Camera live feed started - Person detected at ");
+    Serial.print((int)dist);
+    Serial.println(" cm");
   }
 
   // GOOD RANGE check: between MIN_CM and GOOD_CM (with hysteresis)
@@ -560,7 +585,7 @@ void loop() {
     }
     state = COOLDOWN;
     stateUntil = now + COOLDOWN_MS;
-    lcdShow("PLEASE WAIT", "...");
+    lcdShow(centerText("PLEASE WAIT"), centerText("Cooldown..."));
     setColor(255, 255, 0); // Yellow for please wait
     return;
   }
@@ -570,7 +595,8 @@ void loop() {
     if (now < stateUntil) {
       setColor(255, 255, 0); // Yellow for please wait
       if (fabs(dist - lastShownDist) > 2.0f) {
-        lcdShow("PLEASE WAIT", "Dist:" + String((int)dist) + "cm");
+        String distMsg = String((int)dist) + " cm";
+        lcdShow(centerText("PLEASE WAIT"), centerText(distMsg));
         lastShownDist = dist;
         delay(100); // LCD update delay
       }
@@ -589,8 +615,8 @@ void loop() {
 
     setColor(255, 0, 0); // Red for error
     if (fabs(dist - lastShownDist) > 1.0f) {
-      String distMsg = "Dist: " + String((int)dist) + "cm";
-      lcdShow("TOO CLOSE!", distMsg);
+      String distMsg = String((int)dist) + " cm";
+      lcdShow(centerText("TOO CLOSE!"), centerText(distMsg));
       lastShownDist = dist;
       delay(150); // LCD update delay
     }
@@ -604,7 +630,8 @@ void loop() {
 
     setColor(255, 0, 0);
     if (fabs(dist - lastShownDist) > 1.0f) {
-      lcdShow("TOO FAR", "Need <= 40cm");
+      String distMsg = String((int)dist) + " cm";
+      lcdShow(centerText("TOO FAR!"), centerText(distMsg));
       lastShownDist = dist;
       delay(150); // LCD update delay
     }
@@ -615,7 +642,7 @@ void loop() {
   if (state != READY_STABLE) {
     state = READY_STABLE;
     stableHits = 0;
-    lcdShow("GOOD RANGE", "Hold still...");
+    lcdShow(centerText("GOOD RANGE"), centerText("Hold still..."));
     setColor(255, 255, 255); // White for lighting in good range
     delay(250); // State transition delay
   }
@@ -630,7 +657,7 @@ void loop() {
   state = TESTING;
   stableHits = 0;
 
-  lcdShow("CHECKING...", "Face verify");
+  lcdShow(centerText("CHECKING..."), centerText("Face verify"));
   setColor(0, 0, 255); // Blue for checking/verifying
 
   String json;
@@ -643,7 +670,7 @@ void loop() {
 
   if (!ok || json.length() < 5) {
     lastPass = false;
-    String errMsg = "FAIL: No response from ESP32 - Check connection";
+    String errMsg = "ERROR: No ESP32 response - Check connection";
     startResultDisplay(errMsg);
     setColor(255, 0, 0);
     Serial.println(errMsg);
@@ -659,9 +686,9 @@ void loop() {
     // If still no text, provide meaningful default
     if (text.length() == 0) {
       if (lastPass) {
-        text = "Welcome! Access Granted";
+        text = "WELCOME! Access Granted";
       } else {
-        text = "Access Denied - Face not recognized";
+        text = "ACCESS DENIED - Face not recognized";
       }
     }
     
