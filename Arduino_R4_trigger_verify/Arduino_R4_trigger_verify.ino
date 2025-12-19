@@ -673,6 +673,14 @@ void loop() {
   state = TESTING;
   stableHits = 0;
 
+  // 3 second countdown before capture
+  for (int countdown = 3; countdown >= 1; countdown--) {
+    String countStr = String(countdown);
+    lcdShow(centerText("GET READY!"), centerText(countStr));
+    setColor(0, 0, 255); // Blue for checking/verifying
+    delay(1000); // 1 second per count
+  }
+
   lcdShow(centerText("CHECKING..."), centerText("Face verify"));
   setColor(0, 0, 255); // Blue for checking/verifying
 
