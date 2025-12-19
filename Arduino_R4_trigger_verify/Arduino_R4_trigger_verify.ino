@@ -28,7 +28,7 @@ const char* WIFI_SSID = "esp32";
 const char* WIFI_PASS = "12345678";
 
 // Put the ESP32's IP here (print in ESP32 Serial Monitor)
-const char* ESP32_HOST = "192.168.137.248";
+const char* ESP32_HOST = "192.168.137.203";
 const uint16_t ESP32_PORT = 80;
 
 // ===================== Distance rules =====================
@@ -414,7 +414,7 @@ void checkESP32Connection() {
     NVIC_SystemReset(); // Reset Arduino to go back to setup
   } else {
     lcdShow("ESP32 Warning", String("Fail ") + esp32FailCount + "/" + ESP32_MAX_FAILS);
-    setColor(255, 165, 0); // Orange warning
+    setColor(255, 255, 0); // Yellow for warning
     delay(1000);
   }
 }
@@ -481,7 +481,7 @@ void setup() {
         esp32Connected = true;
         Serial.println("ESP32 connection OK");
         lcdShow("CONNECTED!", "System Ready");
-        setColor(0, 255, 0);
+        setColor(0, 255, 0); // Green for good connection
         delay(1500);
         lcdShow("READY", "Stand <= 40cm");
       } else {
@@ -491,7 +491,7 @@ void setup() {
         if (esp32Attempts >= MAX_ESP32_ATTEMPTS) {
           Serial.println("ESP32 connection FAILED - Resetting to attempt 1");
           lcdShow("ESP32 FAIL", "Retry from 1...");
-          setColor(255, 165, 0); // Orange
+          setColor(255, 255, 0); // Yellow for waiting
           delay(2000);
           esp32Attempts = 0; // Reset counter to loop again
         }
@@ -555,20 +555,20 @@ void loop() {
   if (state == SHOW_RESULT) {
     if (now < stateUntil) {
       tickResultScroll(now); // keep scrolling during result display
-      setColor(lastPass ? 0 : 255, lastPass ? 255 : 0, 0);
+      setColor(lastPass ? 0 : 255, lastPass ? 255 : 0, 0); // Green for pass, Red for fail
       return;
     }
     state = COOLDOWN;
     stateUntil = now + COOLDOWN_MS;
     lcdShow("PLEASE WAIT", "...");
-    setColor(255, 120, 0);
+    setColor(255, 255, 0); // Yellow for please wait
     return;
   }
 
   // ===================== COOLDOWN =====================
   if (state == COOLDOWN) {
     if (now < stateUntil) {
-      setColor(255, 120, 0);
+      setColor(255, 255, 0); // Yellow for please wait
       if (fabs(dist - lastShownDist) > 2.0f) {
         lcdShow("PLEASE WAIT", "Dist:" + String((int)dist) + "cm");
         lastShownDist = dist;
@@ -587,7 +587,7 @@ void loop() {
     state = TOO_CLOSE;
     stableHits = 0;
 
-    setColor(255, 100, 0); // Orange-red
+    setColor(255, 0, 0); // Red for error
     if (fabs(dist - lastShownDist) > 1.0f) {
       String distMsg = "Dist: " + String((int)dist) + "cm";
       lcdShow("TOO CLOSE!", distMsg);
@@ -616,13 +616,13 @@ void loop() {
     state = READY_STABLE;
     stableHits = 0;
     lcdShow("GOOD RANGE", "Hold still...");
-    setColor(0, 80, 255);
+    setColor(255, 255, 255); // White for lighting in good range
     delay(250); // State transition delay
   }
 
   stableHits++;
   if (stableHits < IN_RANGE_HITS_REQUIRED) {
-    setColor(0, 80, 255);
+    setColor(255, 255, 255); // White for lighting in good range
     return;
   }
 
@@ -631,7 +631,7 @@ void loop() {
   stableHits = 0;
 
   lcdShow("CHECKING...", "Face verify");
-  setColor(0, 0, 255);
+  setColor(0, 0, 255); // Blue for checking/verifying
 
   String json;
   bool ok = espVerify(json);
