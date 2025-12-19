@@ -28,7 +28,7 @@ const char* WIFI_SSID = "esp32";
 const char* WIFI_PASS = "12345678";
 
 // Put the ESP32's IP here (print in ESP32 Serial Monitor)
-const char* ESP32_HOST = "192.168.137.108";
+const char* ESP32_HOST = "192.168.137.248";
 const uint16_t ESP32_PORT = 80;
 
 // ===================== Distance rules =====================
@@ -56,9 +56,9 @@ const unsigned long WIFI_CHECK_INTERVAL_MS = 3000; // Check WiFi every 3 seconds
 
 // ===================== ESP32 check interval =====================
 unsigned long lastESP32Check = 0;
-const unsigned long ESP32_CHECK_INTERVAL_MS = 10000; // Check ESP32 every 10 seconds
+const unsigned long ESP32_CHECK_INTERVAL_MS = 15000; // Check ESP32 every 15 seconds
 int esp32FailCount = 0;
-const int ESP32_MAX_FAILS = 3; // Reset after 3 consecutive failures
+const int ESP32_MAX_FAILS = 5; // Reset after 5 consecutive failures
 
 int stableHits = 0;
 unsigned long stateUntil = 0;
@@ -192,11 +192,22 @@ float readDistanceCM_once() {
   digitalWrite(trigPin, LOW);
 
   unsigned long duration = pulseIn(echoPin, HIGH, 30000UL);
-  if (duration == 0) return -1;
-  return duration * 0.034f / 2.0f;
+  if (duration == 0) {
+    //Serial.println("[ULTRASONIC] No echo received (timeout)");
+    return -1;
+  }
+  float distance = duration * 0.034f / 2.0f;
+  //Serial.print("[ULTRASONIC] Raw distance: ");
+  //Serial.print(distance);
+  //Serial.println(" cm");
+  return distance;
 }
 
 float smoothDistanceCM(int samples = 5) {
+  //Serial.print("[ULTRASONIC] Starting smoothed reading (");
+  //Serial.print(samples);
+  //Serial.println(" samples):");
+  
   float sum = 0;
   int count = 0;
 
@@ -205,8 +216,22 @@ float smoothDistanceCM(int samples = 5) {
     if (d > 0) { sum += d; count++; }
     delay(8);
   }
-  if (count == 0) return -1;
-  return sum / count;
+  
+  if (count == 0) {
+    Serial.println("[ULTRASONIC] Smoothed result: NO VALID READINGS");
+    return -1;
+  }
+  
+  float average = sum / count;
+  // Serial.print("[ULTRASONIC] Smoothed result: ");
+  // Serial.print(average);
+  // Serial.print(" cm (from ");
+  // Serial.print(count);
+  // Serial.print("/");
+  // Serial.print(samples);
+  // Serial.println(" valid samples)");
+  
+  return average;
 }
 
 // ===================== HTTP helpers =====================
@@ -234,7 +259,7 @@ String httpGET(const String& path, int timeoutMs = 7000) {
 }
 
 bool espSetActive(bool enable) {
-  String body = httpGET(String("/active?enable=") + (enable ? "1" : "0"), 4000);
+  String body = httpGET(String("/active?enable=") + (enable ? "1" : "0"), 8000);
   return body.length() > 0;
 }
 
@@ -346,15 +371,37 @@ void checkAndReconnectWiFi() {
 
 // ===================== ESP32 connection check =====================
 void checkESP32Connection() {
+  // Only check when idle or cooldown to avoid interference
+  if (state != IDLE && state != COOLDOWN) {
+    Serial.println("Skipping ESP32 check (system busy)");
+    return;
+  }
+  
   Serial.println("Checking ESP32 connection...");
   
-  if (espSetActive(true)) {
-    Serial.println("ESP32 check: OK");
+  // Try multiple times before declaring failure
+  bool connected = false;
+  for (int attempt = 1; attempt <= 2; attempt++) {
+    Serial.print("ESP32 check attempt ");
+    Serial.print(attempt);
+    Serial.print("/2... ");
+    
+    if (espSetActive(true)) {
+      Serial.println("OK");
+      connected = true;
+      break;
+    }
+    
+    Serial.println("failed");
+    if (attempt < 2) delay(800); // Brief delay between retries
+  }
+  
+  if (connected) {
     esp32FailCount = 0; // Reset fail counter on success
     return;
   }
   
-  // ESP32 check failed
+  // ESP32 check failed after retries
   esp32FailCount++;
   Serial.print("ESP32 check FAILED! Fail count: ");
   Serial.println(esp32FailCount);
@@ -368,7 +415,7 @@ void checkESP32Connection() {
   } else {
     lcdShow("ESP32 Warning", String("Fail ") + esp32FailCount + "/" + ESP32_MAX_FAILS);
     setColor(255, 165, 0); // Orange warning
-    delay(500);
+    delay(1000);
   }
 }
 

@@ -20,8 +20,8 @@ const char* WIFI_SSID = "esp32";
 const char* WIFI_PASS = "12345678";
 
 // -------------------- Face server --------------------
-const char* FACE_API_URL        = "http://178.128.52.230:8000/identify";
-const char* REGISTER_API_BASE   = "http://178.128.52.230:8000/register?name=";
+const char* FACE_API_URL        = "http://192.168.137.82:8000/identify";
+const char* REGISTER_API_BASE   = "http://192.168.137.82:8000/register?name=";
 const char* FACE_API_KEY        = "CARL_PHILIP_RENCE";
 
 // -------------------- Camera pins (AI Thinker ESP32-CAM) --------------------
@@ -54,6 +54,10 @@ bool g_streaming = false;
 unsigned long g_lastMs = 0;
 String g_lastJson = "{\"status\":\"none\"}"; // always valid JSON for /state
 String g_lastErr  = "";
+
+// -------------------- WiFi monitoring --------------------
+unsigned long lastWiFiCheck = 0;
+const unsigned long WIFI_CHECK_INTERVAL = 3000; // Check every 3 seconds
 
 // -------------------- UI HTML --------------------
 static const char INDEX_HTML[] PROGMEM = R"HTML(
@@ -636,6 +640,34 @@ static String urlEncode(const String& s) {
   return out;
 }
 
+// -------------------- WiFi Helper --------------------
+void checkAndReconnectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  
+  Serial.println("[WiFi] Disconnected! Reconnecting...");
+  
+  WiFi.disconnect();
+  delay(500);
+  
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+    delay(300);
+    Serial.print(".");
+  }
+  Serial.println();
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("[WiFi] Reconnected! IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("[WiFi] Reconnect failed, will retry...");
+  }
+}
+
 // -------------------- Routes --------------------
 void handleHelp() {
   String msg =
@@ -661,7 +693,9 @@ void handleActive() {
     String v = server.arg("enable");
     g_active = (v == "1" || v == "true");
   }
-  sendJson(200, String("{\"active\":") + (g_active ? "true" : "false") + "}");
+  // Quick response - don't let this timeout
+  String response = String("{\"active\":") + (g_active ? "true" : "false") + ",\"busy\":" + (g_busy ? "true" : "false") + "}";
+  sendJson(200, response);
 }
 
 void handleStream() {
@@ -872,13 +906,31 @@ void setup() {
     while (true) delay(1000);
   }
 
+  // WiFi setup with better stability
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.setSleep(false); // Disable WiFi sleep for stability
+  
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("Connecting WiFi");
-  while (WiFi.status() != WL_CONNECTED) { delay(400); Serial.print("."); }
+  
+  unsigned long startTime = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startTime < 20000) { 
+    delay(400); 
+    Serial.print("."); 
+  }
   Serial.println();
-  Serial.print("ESP32 IP: ");
-  Serial.println(WiFi.localIP());
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("ESP32 IP: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("Signal Strength: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+  } else {
+    Serial.println("WiFi connection failed! Restarting...");
+    ESP.restart();
+  }
 
   server.on("/", handleUI);
   server.on("/help", handleHelp);
@@ -894,5 +946,12 @@ void setup() {
 }
 
 void loop() {
+  // Check WiFi connection periodically
+  unsigned long now = millis();
+  if (now - lastWiFiCheck >= WIFI_CHECK_INTERVAL) {
+    lastWiFiCheck = now;
+    checkAndReconnectWiFi();
+  }
+  
   server.handleClient();
 }
