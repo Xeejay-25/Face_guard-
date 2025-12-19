@@ -32,8 +32,10 @@ const char* ESP32_HOST = "192.168.137.203";
 const uint16_t ESP32_PORT = 80;
 
 // ===================== Distance rules =====================
-const float MIN_CM = 30.0f;           // minimum detection distance (below = too close)
-const float GOOD_CM = 40.0f;          // GOOD RANGE upper limit
+const float REGISTER_MIN = 20.0f;     // registration minimum
+const float REGISTER_MAX = 25.0f;     // registration maximum
+const float MIN_CM = 35.0f;           // minimum detection distance (below = too close)
+const float GOOD_CM = 45.0f;          // GOOD RANGE upper limit
 const float FAR_CM  = 70.0f;          // presence detection limit
 const float HYSTERESIS_CM = 2.5f;     // reduce flicker near boundary
 
@@ -47,7 +49,7 @@ const unsigned long COOLDOWN_MS = 4500;
 const unsigned long RESULT_HOLD_MS = 10000;
 
 // ===================== State machine =====================
-enum State { IDLE, TOO_CLOSE, TOO_FAR, READY_STABLE, TESTING, SHOW_RESULT, COOLDOWN };
+enum State { IDLE, TOO_CLOSE, TOO_FAR, READY_STABLE, REGISTRATION, TESTING, SHOW_RESULT, COOLDOWN };
 State state = IDLE;
 
 // ===================== WiFi check interval =====================
@@ -98,7 +100,7 @@ void rainbowStep() {
 }
 
 // ===================== LCD helpers =====================
-String idleMessage = "    IDENTITY GUARD      FACE RECOGNITION    ";
+String idleMessage = "    IDENTITY GUARD   FACE RECOGNITION    ";
 int textPos = 0;
 
 // Helper to center text on 16-char LCD line
@@ -129,13 +131,12 @@ void lcdIdleScroll(unsigned long now) {
   int len = idleMessage.length();
   String displayMsg = idleMessage.substring(textPos) + idleMessage.substring(0, textPos);
 
+  // Write directly without clearing to avoid flicker
   lcd.setCursor(0, 0);
-  lcd.print("                ");
-  lcd.setCursor(0, 0);
-  lcd.print(displayMsg.substring(0,16));
+  lcd.print(displayMsg.substring(0, 16));
 
   lcd.setCursor(0, 1);
-  lcd.print(" Stand <= 40cm  ");
+  lcd.print("                "); // Keep second line clear
 
   textPos = (textPos + 1) % len;
 }
@@ -608,6 +609,21 @@ void loop() {
     state = TOO_FAR;
   }
 
+  // ===================== REGISTRATION MODE (20-25cm) =====================
+    if (dist > 0 && dist >= REGISTER_MIN && dist <= REGISTER_MAX) {
+    state = REGISTRATION;
+    stableHits = 0;
+
+    setColor(0, 255, 0); // Green LED for registration
+    if (fabs(dist - lastShownDist) > 1.0f) {
+      String distMsg = String((int)dist) + " cm";
+      lcdShow(centerText("REGISTRATION"), centerText("Mode Active"));
+      lastShownDist = dist;
+      delay(150); // LCD update delay
+    }
+    return;
+  }
+
   // ===================== TOO CLOSE =====================
   if (dist > 0 && dist < MIN_CM) {
     state = TOO_CLOSE;
@@ -688,7 +704,7 @@ void loop() {
       if (lastPass) {
         text = "WELCOME! Access Granted";
       } else {
-        text = "ACCESS DENIED - Face not recognized";
+        text = "ACCESS DENIED - Face Not Recognized";
       }
     }
     
