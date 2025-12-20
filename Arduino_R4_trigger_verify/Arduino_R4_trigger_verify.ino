@@ -28,7 +28,7 @@ const char* WIFI_SSID = "esp32";
 const char* WIFI_PASS = "12345678";
 
 // Put the ESP32's IP here (print in ESP32 Serial Monitor)
-const char* ESP32_HOST = "192.168.137.160";
+const char* ESP32_HOST = "192.168.137.77";
 const uint16_t ESP32_PORT = 80;
 
 // ===================== Distance rules =====================
@@ -751,10 +751,14 @@ void loop() {
     text.replace("\\n", " ");
     text.replace("\\r", "");
     
+    // Debug: show text BEFORE cleaning
+    Serial.print("Display text (BEFORE cleaning): ");
+    Serial.println(text);
+    
     // Use cleaning function to remove varying patterns (XXce, 101, Verify)
     text = cleanDisplayText(text);
     
-    Serial.print("Display text (after cleaning): ");
+    Serial.print("Display text (AFTER cleaning): ");
     Serial.println(text);
     
     startResultDisplay(text);

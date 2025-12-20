@@ -20,8 +20,8 @@ const char* WIFI_SSID = "esp32";
 const char* WIFI_PASS = "12345678";
 
 // -------------------- Face server --------------------
-const char* FACE_API_URL        = "http://192.168.137.49:8000/identify";
-const char* REGISTER_API_BASE   = "http://192.168.137.49:8000/register?name=";
+const char* FACE_API_URL        = "http://192.168.137.152:8000/identify";
+const char* REGISTER_API_BASE   = "http://192.168.137.152:8000/register?name=";
 const char* FACE_API_KEY        = "CARL_PHILIP_RENCE";
 
 // -------------------- Camera pins (AI Thinker ESP32-CAM) --------------------
