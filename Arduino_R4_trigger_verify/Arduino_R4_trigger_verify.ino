@@ -28,7 +28,7 @@ const char* WIFI_SSID = "esp32";
 const char* WIFI_PASS = "12345678";
 
 // Put the ESP32's IP here (print in ESP32 Serial Monitor)
-const char* ESP32_HOST = "192.168.137.203";
+const char* ESP32_HOST = "192.168.137.160";
 const uint16_t ESP32_PORT = 80;
 
 // ===================== Distance rules =====================
@@ -288,6 +288,36 @@ bool espVerify(String &outJson) {
 }
 
 // ===================== JSON helpers (no ArduinoJson needed) =====================
+
+// Helper function to remove unwanted patterns from text
+String cleanDisplayText(String text) {
+  // Remove all possible XXce patterns (where XX is 1-3 digits)
+  // Try common patterns: 0ce through 999ce
+  for (int i = 0; i < 1000; i++) {
+    String pattern = String(i) + "ce";
+    text.replace(pattern, "");
+  }
+  
+  // Remove "101" standalone (in case it appears without "ce")
+  text.replace("101", "");
+  
+  // Remove "Verify" suffix
+  text.replace(" Verify", "");
+  text.replace("Verify", "");
+  
+  // Remove "verify" lowercase too
+  text.replace(" verify", "");
+  text.replace("verify", "");
+  
+  // Clean up multiple spaces
+  while (text.indexOf("  ") >= 0) {
+    text.replace("  ", " ");
+  }
+  
+  text.trim();
+  return text;
+}
+
 String extractJsonStringValue(const String& json, const char* key) {
   String k = String("\"") + key + "\":";
   int p = json.indexOf(k);
@@ -500,7 +530,8 @@ void setup() {
         lcdShow(centerText("CONNECTED!"), centerText("System Ready"));
         setColor(0, 255, 0); // Green for good connection
         delay(1500);
-        lcdShow(centerText("READY"), centerText("Stand <= 40cm"));
+        lcdShow(centerText("READY"), centerText(""));
+        setColor(0, 255, 0);
       } else {
         Serial.println("ESP32 connection attempt failed");
         delay(1500);
@@ -719,9 +750,11 @@ void loop() {
     // Clean up text for better LCD display
     text.replace("\\n", " ");
     text.replace("\\r", "");
-    text.trim();
     
-    Serial.print("Display text: ");
+    // Use cleaning function to remove varying patterns (XXce, 101, Verify)
+    text = cleanDisplayText(text);
+    
+    Serial.print("Display text (after cleaning): ");
     Serial.println(text);
     
     startResultDisplay(text);
